@@ -4,6 +4,7 @@ extern crate sdl2;
 use sdl2::rect::Rect;*/
 use sdl2::hint;
 use sdl2::keyboard::KeyboardState;
+use sdl2::mixer::{self, Music, DEFAULT_FORMAT};
 use sdl2::pixels::Color;
 use sdl2::event::Event;
 
@@ -24,9 +25,16 @@ const HEIGHT: u32 = 600;
 pub fn main() {
     let context = sdl2::init().unwrap();
     let videoSubsystem = context.video().unwrap();
+    //let mixerContext = mixer::init(InitFlag::all());
+
+    mixer::open_audio(44100, DEFAULT_FORMAT, 2, 1024).unwrap();
+
+    let music = Music::from_file(&"Resources/Music/hauntedhouseorgan.wav").unwrap();
+
+    music.play(-1).unwrap();
 
     if !hint::set("SDL_RENDER_SCALE_QUALITY", "0") {
-        eprintln!("Warning: Linear texture filtering may not be enabled");
+        eprintln!("Warning: Linear texture filtering may not be enabled.");
     }
 
     //let _imageContext = image::init(InitFlag::PNG);
@@ -54,7 +62,7 @@ pub fn main() {
     let mut state: Option<KeyboardState>;
 
     let mut keyUpdate = false;
-
+ 
     'main: loop {
         for event in events.poll_iter() {
             if let Event::Quit{..} = event {break 'main;}

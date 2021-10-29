@@ -4,7 +4,7 @@ extern crate sdl2;
 use sdl2::rect::Rect;*/
 use sdl2::hint;
 use sdl2::keyboard::KeyboardState;
-use sdl2::mixer::{self, Music, DEFAULT_FORMAT};
+use sdl2::mixer::{self, Channel, DEFAULT_FORMAT, Music};
 use sdl2::pixels::Color;
 use sdl2::event::Event;
 
@@ -15,9 +15,11 @@ mod PlayerMod;
 mod SpriteLoader;
 mod MapMod;
 mod CollisionMod;
+mod SkeletonMod;
 
 use MapMod::*;
 use PlayerMod::*;
+use SkeletonMod::*;
 
 const WIDTH: u32 = 850;
 const HEIGHT: u32 = 600;
@@ -33,7 +35,9 @@ pub fn main() {
 
     music.play(-1).unwrap();
 
-    if !hint::set("SDL_RENDER_SCALE_QUALITY", "0") {
+    let mut channel = Channel::all();
+
+    if !hint::set("SDL_RENDER_SCALE_QUALITY", "1") {
         eprintln!("Warning: Linear texture filtering may not be enabled.");
     }
 
@@ -49,6 +53,8 @@ pub fn main() {
     let creator = canvas.texture_creator();
 
     let mut player = Player::new(&creator, 50, 50);
+
+    let mut skeleton = Skeleton::new(&creator, 600, 50);
 
     let map = Map::new(TILES, &creator);
 
@@ -70,9 +76,11 @@ pub fn main() {
         }
         if keyUpdate {state = Some(events.keyboard_state());}
         else {state = None}
-        player.update(state, &events, &map);
+        channel = player.update(state, &events, channel, &map, &mut skeleton);
+        channel = skeleton.update(&player, channel);
         canvas.clear();
         map.render(&mut canvas);
+        skeleton.draw(&mut canvas);
         player.draw(&mut canvas);
         canvas.present();
         keyUpdate = false;

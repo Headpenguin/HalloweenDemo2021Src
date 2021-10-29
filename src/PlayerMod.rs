@@ -1,6 +1,7 @@
 extern crate sdl2;
 
 use sdl2::EventPump;
+use sdl2::mixer::Channel;
 use sdl2::render::Canvas;
 //use sdl2::render::Texture;
 use sdl2::render::TextureCreator;
@@ -11,6 +12,8 @@ use sdl2::keyboard::{KeyboardState, Scancode};
 use crate::CollisionMod::Collision;
 use crate::MapMod::Map;
 use crate::SpriteLoader::FlipAnimation;
+use crate::SpriteLoader::Sprites;
+use crate::Skeleton;
 
 use super::SpriteLoader::{Animation, StandardAnimation, Animations};
 
@@ -25,12 +28,14 @@ enum Direction {
 
 pub struct Player<'a> {
     animations: Animations<'a>,
+    sword: Sprites<'a>,
     timer: u32,
     position: Rect,
     hitbox: Rect,
     velocity: Vector,
     direction: Direction,
     attackTimer: u32,
+    trapped: bool,
 }
 
 impl<'a> Player<'a> {
@@ -55,25 +60,79 @@ impl<'a> Player<'a> {
         let position = Rect::new(x, y, 50, 50);
         let hitbox = Rect::new(x + 2, y + 2, 46, 46);
         let velocity = Vector(0, 0);
-        Player{animations, timer: 0, position, hitbox, velocity, direction: Direction::Down, attackTimer: 0,}
+        let sword = Sprites::new(creator, &[&"Resources/Images/Sword.png"]).unwrap();
+        Player{animations, sword, timer: 0, position, hitbox, velocity, direction: Direction::Down, attackTimer: 0, trapped: false,}
     }
 
     pub fn draw(&self, canvas: &mut Canvas<Window>) {
-        self.animations.drawNextFrame(canvas, self.position);
+        if self.attackTimer > 0 {
+            match self.direction {
+                Direction::Down => {
+                    self.animations.drawNextFrame(canvas, self.position);
+                    self.sword.getSprite(0).draw(canvas,
+                    Rect::new(SWORD_DOWN.0 + self.position.x(),
+                    SWORD_DOWN.1 + self.position.y(),
+                    SWORD_DOWN.2,
+                    SWORD_DOWN.3), false, true);
+                },
+                Direction::Left => {
+                    self.sword.getSprite(0).draw(canvas,
+                    Rect::new(SWORD_LEFT.0 + self.position.x(),
+                    SWORD_LEFT.1 + self.position.y(),
+                    SWORD_LEFT.2,
+                    SWORD_LEFT.3), false, false);
+                    self.animations.drawNextFrame(canvas, self.position);
+                },
+                Direction::Right => {
+                    self.sword.getSprite(0).draw(canvas,
+                    Rect::new(SWORD_RIGHT.0 + self.position.x(),
+                    SWORD_RIGHT.1 + self.position.y(),
+                    SWORD_RIGHT.2,
+                    SWORD_RIGHT.3), false, false);
+                    self.animations.drawNextFrame(canvas, self.position);
+                },
+                Direction::Up => {
+                    self.sword.getSprite(0).draw(canvas,
+                    Rect::new(SWORD_UP.0 + self.position.x(),
+                    SWORD_UP.1 + self.position.y(),
+                    SWORD_UP.2,
+                    SWORD_UP.3), false, false);
+                    self.animations.drawNextFrame(canvas, self.position);
+                },
+            }
+        }
+        else {
+            self.animations.drawNextFrame(canvas, self.position);
+    
+        }
     }
 
-    pub fn update(&mut self, state: Option<KeyboardState>, events: &EventPump, map: &Map) {
-        
+    pub fn update(&mut self, state: Option<KeyboardState>, events: &EventPump, mut channel: Channel, map: &Map, skeleton: &mut Skeleton) -> Channel {
         if let Some(state) = state {
             self.checkKeyboardInput(&state);
         }
 
-        self.position.reposition((self.position.x + self.velocity.0, self.position.y + self.velocity.1));
-        self.hitbox.reposition((self.hitbox.x + self.velocity.0, self.hitbox.y + self.velocity.1));
+        self.position.reposition((self.position.x + self.velocity.0, self.position.y));
+        self.hitbox.reposition((self.hitbox.x + self.velocity.0, self.hitbox.y));
 
-        if map.doesCollide(self.hitbox) {
-            self.position.reposition((self.position.x - self.velocity.0, self.position.y - self.velocity.1));
-            self.hitbox.reposition((self.hitbox.x - self.velocity.0, self.hitbox.y - self.velocity.1));
+        if map.doesCollide(self.hitbox) || skeleton.doesCollide(self.hitbox) {
+            self.position.reposition((self.position.x - self.velocity.0, self.position.y));
+            self.hitbox.reposition((self.hitbox.x - self.velocity.0, self.hitbox.y));
+        }
+
+        self.position.reposition((self.position.x, self.position.y + self.velocity.1));
+        self.hitbox.reposition((self.hitbox.x, self.hitbox.y + self.velocity.1));
+
+        if map.doesCollide(self.hitbox) || skeleton.doesCollide(self.hitbox) {
+            self.position.reposition((self.position.x, self.position.y - self.velocity.1));
+            self.hitbox.reposition((self.hitbox.x, self.hitbox.y - self.velocity.1));
+        }
+
+        if !self.trapped {
+            if self.position.x() >= THRESHOLD {
+                channel = skeleton.trapPlayer(channel);
+                self.trapped = true;
+            }
         }
         
         self.timer += 1;
@@ -95,7 +154,7 @@ impl<'a> Player<'a> {
                 self.checkKeyboardInput(&events.keyboard_state());
             }
         }
-
+        channel
     }
 
     pub fn checkKeyboardInput(&mut self, state: &KeyboardState) {
@@ -139,12 +198,45 @@ impl<'a> Player<'a> {
             }.unwrap();    
         }
     }
+
+    fn relTupleToRect(&self, coords: (i32, i32, u32, u32)) -> Rect {
+        Rect::new(
+            coords.0 + self.position.x(),
+            coords.1 + self.position.y(),
+            coords.2,
+            coords.3,
+        )
+    }
+
+    pub fn attackCollision(&self, hitbox: Rect) -> bool {
+        if self.attackTimer == 0 {
+            return false;
+        }
+        let coords = match self.direction {
+            Direction::Down => SWORD_DOWN_COLLISION,
+            Direction::Left => SWORD_LEFT_COLLISION,
+            Direction::Right => SWORD_RIGHT_COLLISION,
+            Direction::Up => SWORD_UP_COLLISION,
+        };
+        let attackBox = self.relTupleToRect(coords);
+        attackBox.has_intersection(hitbox)
+    }
 }
 
 
 
 
+pub const THRESHOLD: i32 = 450;
 
+const SWORD_DOWN: (i32, i32, u32, u32) = (10, 43, 30, 30);
+const SWORD_RIGHT: (i32, i32, u32, u32) = (30, 5, 30, 30);
+const SWORD_LEFT: (i32, i32, u32, u32) = (-10, 5, 30, 30);
+const SWORD_UP: (i32, i32, u32, u32) = (0, -10, 50, 50);
+
+const SWORD_DOWN_COLLISION: (i32, i32, u32, u32) = (23, 43, 4, 16);
+const SWORD_RIGHT_COLLISION: (i32, i32, u32, u32) = (43, 5, 4, 16);
+const SWORD_LEFT_COLLISION: (i32, i32, u32, u32) = (3, 5, 4, 16);
+const SWORD_UP_COLLISION: (i32, i32, u32, u32) = (27, -10, 6, 27);
 
 
 const NINJA_FLOAT: &[&str] = &[    
